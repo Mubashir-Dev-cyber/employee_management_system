@@ -7,7 +7,7 @@ It talks to the Express API in `../backend`; it never connects to PostgreSQL dir
 
 Start PostgreSQL and the backend first (see `../backend/README.md`): `npm install`,
 `npm run migrate:deploy`, a manager account (below), optionally `npm run seed` for sample leave
-requests, then `npm start` (port 5000). Then, here:
+requests and attendance, then `npm start` (port 5000). Then, here:
 
 ```bash
 npm install
@@ -46,17 +46,24 @@ the manager screens, and only for their own team; HR admins see a placeholder un
 are built. The JWT is kept in `expo-secure-store` on phones (in memory on web, so a reload signs you
 out) and sent as a Bearer token. A 401 signs you out.
 
-## What is real and what is sample data
+## Where the data comes from
 
-| Screen | Data | Backend endpoint that will replace the sample |
-|---|---|---|
-| My Team, member details | **Real** — `GET /api/manager/team`, `GET /api/manager/team/:id` (employees whose `managerId` is the manager) | — |
-| Leave approvals, leave history | **Real** — `GET /api/manager/leave-requests?status=`, `GET /api/manager/team/:id/leave-requests`, `PATCH /api/manager/leave-requests/:id` | — |
-| Attendance (team, member last 7 days) | Sample, but real approved leave shows as "On leave" | `GET /api/manager/attendance?date=YYYY-MM-DD` |
-| Overview | Team size and pending leave real, attendance sample | — |
+Every screen shows real data from the backend; all calls go through `src/api/manager.js`.
 
-Screens with sample data show a yellow **Sample data** badge. All data access goes through
-`src/api/manager.js` — swap a function's body for a `request()` call when its endpoint exists.
+| Screen | Backend |
+|---|---|
+| My Team, member details | `GET /api/manager/team`, `GET /api/manager/team/:id` (employees whose `managerId` is the manager) |
+| Leave approvals, leave history | `GET /api/manager/leave-requests?status=`, `GET /api/manager/team/:id/leave-requests`, `PATCH /api/manager/leave-requests/:id` |
+| Attendance, member's last 7 days | `GET /api/manager/attendance?date=YYYY-MM-DD`, `GET /api/manager/team/:id/attendance?days=7` |
+| Correction requests | `POST /api/manager/attendance-corrections`, `GET /api/manager/attendance-corrections` |
+| Overview | today's attendance and pending leave |
+
+Attendance records come from employees checking in (the Employee app, still to be built); until
+then `npm run seed` in `backend/` adds six weeks of sample check-ins. **Managers can't change
+attendance.** On the Attendance tab, tapping a person (today and the 6 days before) opens a form to
+ask HR for a correction with a reason. The day then shows "Correction waiting for HR"; only an HR
+approval changes it ("Corrected by HR"). **My correction requests** lists every request and HR's
+answer.
 
 ## Layout
 
@@ -65,8 +72,9 @@ src/app/            screens (Expo Router — every file is a route)
   login.js          email + password sign-in
   (manager)/        bottom tabs: Overview, My Team, Attendance, Leave
   member/[id].js    team member details
+  corrections.js    the manager's attendance correction requests
   coming-soon.js    placeholder for roles without screens yet
-src/api/            client.js (fetch wrapper + Bearer token), auth.js, manager.js, mock.js
+src/api/            client.js (fetch wrapper + Bearer token), auth.js, manager.js
 src/components/     shared UI
 src/auth/           session (AuthContext) and token storage
 ```

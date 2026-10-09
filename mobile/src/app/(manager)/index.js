@@ -6,7 +6,6 @@ import { useAuth } from "../../auth/AuthContext";
 import Button from "../../components/Button";
 import Card from "../../components/Card";
 import { leaveSummary } from "../../components/LeaveCard";
-import SampleDataBadge from "../../components/SampleDataBadge";
 import { ErrorState, LoadingState } from "../../components/States";
 import StatusPill from "../../components/StatusPill";
 import { useAsync } from "../../hooks/useAsync";
@@ -39,8 +38,7 @@ export default function OverviewScreen() {
   if (status === "loading") return <LoadingState />;
   if (status === "error") return <ErrorState error={error} onRetry={reload} />;
 
-  const { teamSize, counts, pending } = data;
-  const isDayOff = teamSize > 0 && counts.OFF === teamSize;
+  const { teamSize, workday, counts, pending } = data;
 
   return (
     <ScrollView
@@ -64,10 +62,9 @@ export default function OverviewScreen() {
         <Stat icon="alarm-outline" label="Late today" value={counts.LATE} onPress={() => router.navigate("/attendance")} />
         <Stat icon="hourglass-outline" label="Pending leave" value={pending.length} onPress={() => router.navigate("/leave")} />
       </View>
-      <SampleDataBadge label="Attendance is sample data" />
 
       <Card title="Today's attendance">
-        {isDayOff ? (
+        {!workday ? (
           <Text style={font.small}>No shift scheduled today.</Text>
         ) : (
           <View style={styles.breakdown}>

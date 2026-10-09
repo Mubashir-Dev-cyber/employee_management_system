@@ -1,10 +1,8 @@
 import { todayKey } from "../utils/date";
 import { request } from "./client";
-import * as mock from "./mock";
 
-// Everything the manager screens need. Team and leave data are real; attendance
-// is sample data (see mock.js) until GET /api/manager/attendance exists.
-// The backend works out whose team it is from the signed-in manager account.
+// Everything the manager screens need, all from the backend. It works out whose team
+// it is from the signed-in manager account.
 
 function managerUrl(path, params = {}) {
   const query = Object.entries(params)
@@ -47,32 +45,44 @@ export async function decideLeave(id, decision, note) {
   return leaveRequest;
 }
 
-const approvedOnly = (leave) => leave.filter((r) => r.status === "APPROVED");
-
-// Sample, but people on real approved leave show as "On leave".
-// Later: GET /api/manager/attendance?date=YYYY-MM-DD
+// GET /api/manager/attendance?date=YYYY-MM-DD
+// -> { date, workday, shift, rows: [{ employee, record }], counts }
 export async function getTeamAttendance(dateKey) {
-  const [team, approved] = await Promise.all([getTeam(), getLeaveRequests("APPROVED")]);
-  await mock.delay();
-  const rows = mock.teamAttendance(team, dateKey, approved);
-  return { rows, counts: mock.summarize(rows.map((r) => r.record)) };
+  const { date, workday, shift, rows, counts } = await request(managerUrl("/api/manager/attendance", { date: dateKey }));
+  return { date, workday, shift, rows, counts };
 }
 
-// Sample. `leave` is the member's real leave history (from getMemberLeave).
-// Later: GET /api/manager/team/:id/attendance?days=7
-export async function getMemberAttendance(member, days = 7, leave = []) {
-  await mock.delay();
-  return mock.memberAttendance(member, days, approvedOnly(leave));
+// GET /api/manager/team/:id/attendance?days=7 -> newest day first
+export async function getMemberAttendance(member, days = 7) {
+  const { records } = await request(
+    managerUrl(`/api/manager/team/${encodeURIComponent(member.id)}/attendance`, { days })
+  );
+  return records;
 }
 
-// Team size and pending leave are real; today's attendance is sample.
+// Today's attendance plus the leave requests waiting for the manager.
 export async function getOverview() {
-  const [team, leave] = await Promise.all([getTeam(), getLeaveRequests()]);
-  await mock.delay();
-  const today = mock.teamAttendance(team, todayKey(), approvedOnly(leave));
+  const [today, pending] = await Promise.all([getTeamAttendance(todayKey()), getLeaveRequests("PENDING")]);
   return {
-    teamSize: team.length,
-    counts: mock.summarize(today.map((r) => r.record)),
-    pending: leave.filter((r) => r.status === "PENDING"),
+    teamSize: today.rows.length,
+    workday: today.workday,
+    counts: today.counts,
+    pending,
   };
+}
+
+// Managers can't change attendance; they ask HR to correct a day.
+// POST /api/manager/attendance-corrections  { employeeId, date, checkIn, checkOut, reason }
+export async function requestCorrection({ employeeId, date, checkIn, checkOut, reason }) {
+  const { correction } = await request(managerUrl("/api/manager/attendance-corrections"), {
+    method: "POST",
+    body: JSON.stringify({ employeeId, date, checkIn, checkOut: checkOut || null, reason: reason.trim() }),
+  });
+  return correction;
+}
+
+// GET /api/manager/attendance-corrections?status=PENDING (no status = all)
+export async function getCorrections(status) {
+  const { corrections } = await request(managerUrl("/api/manager/attendance-corrections", { status }));
+  return corrections;
 }

@@ -4,13 +4,13 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { getMemberAttendance, getMemberLeave, getTeamMember } from "../../api/manager";
 import Avatar from "../../components/Avatar";
 import Card from "../../components/Card";
+import CorrectionTag from "../../components/CorrectionTag";
 import { leaveSummary } from "../../components/LeaveCard";
-import SampleDataBadge from "../../components/SampleDataBadge";
 import { ErrorState, LoadingState } from "../../components/States";
 import StatusPill from "../../components/StatusPill";
 import { useAsync } from "../../hooks/useAsync";
 import { colors, font, spacing } from "../../theme";
-import { formatIsoDate, relativeDayLabel } from "../../utils/date";
+import { formatIsoDate, relativeDayLabel, timeRange } from "../../utils/date";
 import { fullName } from "../../utils/status";
 
 function DetailRow({ label, value }) {
@@ -22,18 +22,14 @@ function DetailRow({ label, value }) {
   );
 }
 
-function attendanceTimes(record) {
-  if (record.checkIn) return `${record.checkIn} – ${record.checkOut ?? "…"}`;
-  return "";
-}
-
 export default function MemberScreen() {
   const { id } = useLocalSearchParams();
   const load = useCallback(async () => {
-    const member = await getTeamMember(id);
-    const leave = await getMemberLeave(member);
-    // Sample attendance, but shows their real approved leave days as "On leave".
-    const attendance = await getMemberAttendance(member, 7, leave);
+    const [member, leave, attendance] = await Promise.all([
+      getTeamMember(id),
+      getMemberLeave({ id }),
+      getMemberAttendance({ id }, 7),
+    ]);
     return { member, attendance, leave };
   }, [id]);
   const { status, data, error, reload } = useAsync(load);
@@ -71,11 +67,14 @@ export default function MemberScreen() {
           <DetailRow label="Hire date" value={formatIsoDate(member.hireDate)} />
         </Card>
 
-        <Card title="Last 7 days" right={<SampleDataBadge label="Sample" />}>
+        <Card title="Last 7 days">
           {attendance.map((record) => (
             <View key={record.date} style={styles.listRow}>
-              <Text style={[font.body, styles.flex]}>{relativeDayLabel(record.date)}</Text>
-              <Text style={font.small}>{attendanceTimes(record)}</Text>
+              <View style={styles.flex}>
+                <Text style={font.body}>{relativeDayLabel(record.date)}</Text>
+                <CorrectionTag correction={record.correction} />
+              </View>
+              <Text style={font.small}>{timeRange(record.checkIn, record.checkOut)}</Text>
               <StatusPill status={record.status} />
             </View>
           ))}

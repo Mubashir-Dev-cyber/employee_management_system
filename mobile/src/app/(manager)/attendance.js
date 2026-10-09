@@ -1,20 +1,21 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useCallback, useState } from "react";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
-import { getTeamAttendance } from "../../api/manager";
-import { SHIFT } from "../../api/mock";
+import { getTeamAttendance, requestCorrection } from "../../api/manager";
 import Avatar from "../../components/Avatar";
-import SampleDataBadge from "../../components/SampleDataBadge";
+import CorrectionModal from "../../components/CorrectionModal";
+import CorrectionTag from "../../components/CorrectionTag";
 import { EmptyState, ErrorState, LoadingState } from "../../components/States";
 import StatusPill from "../../components/StatusPill";
 import { useAsync } from "../../hooks/useAsync";
 import { colors, font, radius, spacing } from "../../theme";
-import { addDays, formatDay, isWeekend, relativeDayLabel, todayKey } from "../../utils/date";
+import { addDays, formatDay, relativeDayLabel, todayKey } from "../../utils/date";
 import { fullName } from "../../utils/status";
 
 const SUMMARY = ["PRESENT", "LATE", "ABSENT", "ON_LEAVE"];
 
-function describe(record) {
+function describe(record, shift) {
   switch (record.status) {
     case "PRESENT":
     case "LATE":
@@ -24,16 +25,17 @@ function describe(record) {
     case "ABSENT":
       return "No check-in";
     case "NOT_IN":
-      return `Shift starts ${record.shift.start}`;
+      return `Shift starts ${shift.start}`;
     default:
       return "No shift";
   }
 }
 
-function DateNav({ date, onChange }) {
+function DateNav({ date, shift, onChange }) {
   const isToday = date === todayKey();
   const label = relativeDayLabel(date);
-  const subtitle = label === formatDay(date) ? "" : `${formatDay(date)} · `;
+  const subtitle = label === formatDay(date) ? "" : formatDay(date);
+  const details = [subtitle, shift && `Shift ${shift.start}–${shift.end}`].filter(Boolean).join(" · ");
   return (
     <View style={styles.dateNav}>
       <Pressable
@@ -45,9 +47,7 @@ function DateNav({ date, onChange }) {
       </Pressable>
       <View style={styles.dateLabel}>
         <Text style={font.heading}>{label}</Text>
-        <Text style={font.small}>
-          {subtitle}Shift {SHIFT.start}–{SHIFT.end}
-        </Text>
+        {details ? <Text style={font.small}>{details}</Text> : null}
       </View>
       <Pressable
         accessibilityLabel="Next day"
@@ -61,27 +61,78 @@ function DateNav({ date, onChange }) {
   );
 }
 
+function RequestsLink({ onPress }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.link, pressed && { opacity: 0.7 }]}
+    >
+      <Ionicons name="document-text-outline" size={18} color={colors.primary} />
+      <Text style={styles.linkText}>My correction requests</Text>
+      <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+    </Pressable>
+  );
+}
+
 export default function AttendanceScreen() {
+  const router = useRouter();
   const [date, setDate] = useState(todayKey);
   const load = useCallback(() => getTeamAttendance(date), [date]);
-  const { status, data, error, reload, refresh, refreshing } = useAsync(load);
+  const { status, data, error, reload, refresh, revalidate, refreshing } = useAsync(load);
+  const [target, setTarget] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [sendError, setSendError] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const openCorrection = (row) => {
+    setSendError(null);
+    setTarget(row);
+  };
+
+  const sendCorrection = async (body) => {
+    setSubmitting(true);
+    setSendError(null);
+    try {
+      await requestCorrection(body);
+      setToast(`Sent to HR: correction for ${fullName(target.employee)}`);
+      setTarget(null);
+      revalidate();
+    } catch (e) {
+      setSendError(e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   let body;
   if (status === "loading") body = <LoadingState label="Loading attendance…" />;
   else if (status === "error") body = <ErrorState error={error} onRetry={reload} />;
-  else
+  else {
+    const canCorrect = data.rows.some((row) => row.record.correctable);
     body = (
       <FlatList
         style={styles.flex}
         contentContainerStyle={styles.content}
-        data={isWeekend(date) ? [] : data.rows}
-        keyExtractor={(row) => row.employee.employeeId}
+        data={data.workday ? data.rows : []}
+        keyExtractor={(row) => String(row.employee.id)}
         refreshing={refreshing}
         onRefresh={refresh}
         ListHeaderComponent={
           <View style={styles.header}>
-            <SampleDataBadge />
-            {!isWeekend(date) && (
+            {toast && (
+              <View style={styles.toast} accessibilityLiveRegion="polite">
+                <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+                <Text style={styles.toastText}>{toast}</Text>
+              </View>
+            )}
+            {data.workday && (
               <View style={styles.summary}>
                 {SUMMARY.map((key) => (
                   <View key={key} style={styles.summaryItem}>
@@ -91,35 +142,56 @@ export default function AttendanceScreen() {
                 ))}
               </View>
             )}
+            <RequestsLink onPress={() => router.push("/corrections")} />
+            {data.workday && canCorrect && (
+              <Text style={font.small}>Wrong time? Tap a person to ask HR for a correction.</Text>
+            )}
           </View>
         }
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListEmptyComponent={
-          isWeekend(date) ? (
-            <EmptyState icon="cafe-outline" title="Weekend" message="No shift is scheduled on this day." />
-          ) : (
+          data.workday ? (
             <EmptyState icon="people-outline" title="No team members yet" />
+          ) : (
+            <EmptyState icon="cafe-outline" title="Weekend" message="No shift is scheduled on this day." />
           )
         }
         renderItem={({ item }) => (
-          <View style={styles.row}>
+          <Pressable
+            disabled={!item.record.correctable}
+            onPress={() => openCorrection(item)}
+            accessibilityRole={item.record.correctable ? "button" : undefined}
+            accessibilityHint={item.record.correctable ? "Ask HR to correct this day" : undefined}
+            style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
+          >
             <Avatar firstName={item.employee.firstName} lastName={item.employee.lastName} size={36} />
             <View style={styles.flex}>
               <Text style={styles.name} numberOfLines={1}>
                 {fullName(item.employee)}
               </Text>
-              <Text style={font.small}>{describe(item.record)}</Text>
+              <Text style={font.small}>{describe(item.record, data.shift)}</Text>
+              <CorrectionTag correction={item.record.correction} />
             </View>
             <StatusPill status={item.record.status} />
-          </View>
+          </Pressable>
         )}
       />
     );
+  }
 
   return (
     <View style={styles.screen}>
-      <DateNav date={date} onChange={setDate} />
+      <DateNav date={date} shift={data?.shift} onChange={setDate} />
       {body}
+
+      <CorrectionModal
+        target={target}
+        date={date}
+        submitting={submitting}
+        error={sendError}
+        onCancel={() => setTarget(null)}
+        onSubmit={sendCorrection}
+      />
     </View>
   );
 }
@@ -160,6 +232,27 @@ const styles = StyleSheet.create({
   },
   summaryItem: { alignItems: "center", gap: spacing.xs },
   summaryValue: { fontSize: 20, fontWeight: "700", color: colors.text },
+  link: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  linkText: { flex: 1, fontSize: 15, fontWeight: "600", color: colors.text },
+  toast: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.successSoft,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  toastText: { flex: 1, color: colors.success, fontWeight: "600" },
   separator: { height: spacing.sm },
   row: {
     flexDirection: "row",

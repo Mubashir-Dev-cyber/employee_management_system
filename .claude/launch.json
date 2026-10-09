@@ -7,6 +7,13 @@
       "runtimeArgs": ["mobile/node_modules/expo/bin/cli", "start", "mobile", "--port", "8091"],
       "port": 8091,
       "autoPort": false
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["backend/server.js"],
+      "port": 5000,
+      "autoPort": false
     }
   ]
 }

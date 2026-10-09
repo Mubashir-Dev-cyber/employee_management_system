@@ -25,6 +25,10 @@ function RootNavigator() {
           name="member/[id]"
           options={{ headerShown: true, title: "Team member", headerBackTitle: "Back" }}
         />
+        <Stack.Screen
+          name="corrections"
+          options={{ headerShown: true, title: "Correction requests", headerBackTitle: "Back" }}
+        />
       </Stack.Protected>
 
       <Stack.Protected guard={Boolean(user) && !isManager}>
