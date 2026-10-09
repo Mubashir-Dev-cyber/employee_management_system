@@ -7,7 +7,9 @@ const authService = require("../src/services/authService");
 const PASSWORD = "Correct-horse-42";
 
 const resetDatabase = () =>
-  prisma.$executeRawUnsafe('TRUNCATE TABLE "LeaveRequest", "Admin", "Employee" RESTART IDENTITY CASCADE');
+  prisma.$executeRawUnsafe(
+    'TRUNCATE TABLE "AttendanceCorrection", "Attendance", "LeaveRequest", "Admin", "Employee" RESTART IDENTITY CASCADE'
+  );
 
 const employee = (code, firstName, managerId = null) =>
   prisma.employee.create({

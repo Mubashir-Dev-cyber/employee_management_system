@@ -1,5 +1,7 @@
 const prisma = require("../utils/prisma");
 const AppError = require("../utils/AppError");
+// startDate/endDate are DATE columns, read back as UTC midnight.
+const { toDateKey } = require("../utils/companyTime");
 
 const getManager = async (managerId) => {
   const manager = await prisma.employee.findUnique({
@@ -34,9 +36,6 @@ const getTeamMember = async (managerId, id) => {
 const leaveInclude = {
   employee: { select: { id: true, employeeId: true, firstName: true, lastName: true, department: true } },
 };
-
-// startDate/endDate are DATE columns, read back as UTC midnight.
-const toDateKey = (date) => date.toISOString().slice(0, 10);
 
 // The shape the mobile app uses.
 const toLeaveDto = (row) => ({

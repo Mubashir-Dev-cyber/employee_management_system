@@ -28,6 +28,11 @@ model Employee {
   leaveRequests  LeaveRequest[] @relation("EmployeeLeave")
   leaveDecisions LeaveRequest[] @relation("LeaveDecider")
 
+  attendance         Attendance[]           @relation("EmployeeAttendance")
+  // Corrections asked for this employee's days, and the ones they asked for as a manager
+  corrections        AttendanceCorrection[] @relation("CorrectionFor")
+  correctionRequests AttendanceCorrection[] @relation("CorrectionRequester")
+
   // The login account of this employee, if they have one (managers do)
   account Admin? @relation("AdminEmployee")
 
@@ -55,6 +60,50 @@ model LeaveRequest {
   @@index([employeeId, status])
 }
 
+// One row per person per work day, created when they check in.
+model Attendance {
+  id         Int       @id @default(autoincrement())
+  employeeId Int
+  employee   Employee  @relation("EmployeeAttendance", fields: [employeeId], references: [id], onDelete: Cascade)
+  date       DateTime  @db.Date // the work day
+  checkIn    DateTime // exact moment, stored in UTC
+  checkOut   DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([date])
+}
+
+// A manager's request to fix a day's times. Only an HR admin can approve it.
+model AttendanceCorrection {
+  id               Int       @id @default(autoincrement())
+  employeeId       Int
+  employee         Employee  @relation("CorrectionFor", fields: [employeeId], references: [id], onDelete: Cascade)
+  date             DateTime  @db.Date
+  // The times the manager says are right
+  checkIn          DateTime
+  checkOut         DateTime?
+  reason           String
+  status           String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  // The manager (an employee) who asked
+  requestedById    Int?
+  requestedBy      Employee? @relation("CorrectionRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  // The HR admin account that approved or rejected it
+  decidedById      Int?
+  decidedBy        Admin?    @relation("CorrectionDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt        DateTime?
+  decisionNote     String?
+  // What the record said when HR approved it, so the change can be traced
+  previousCheckIn  DateTime?
+  previousCheckOut DateTime?
+  createdAt        DateTime  @default(now()) // when it was requested
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status])
+  @@index([employeeId, date])
+}
+
 enum Role {
   HR_ADMIN
   MANAGER
@@ -62,14 +111,16 @@ enum Role {
 
 // Staff accounts that can log in. Existing accounts are HR admins.
 model Admin {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
-  name         String
-  passwordHash String
-  role         Role     @default(HR_ADMIN)
+  id                  Int                    @id @default(autoincrement())
+  email               String                 @unique
+  name                String
+  passwordHash        String
+  role                Role                   @default(HR_ADMIN)
   // For MANAGER accounts: the employee they are, whose team they manage
-  employeeId   Int?      @unique
-  employee     Employee? @relation("AdminEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  employeeId          Int?                   @unique
+  employee            Employee?              @relation("AdminEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+  // Attendance corrections this HR admin approved or rejected
+  correctionDecisions AttendanceCorrection[] @relation("CorrectionDecider")
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
 }

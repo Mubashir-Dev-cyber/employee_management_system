@@ -1,9 +1,11 @@
-// Fills the database with sample leave requests for local development.
-// Run from backend: npm run seed. Employees who already have leave requests are skipped,
-// so it is safe to run again after adding employees.
+// Fills the database with sample leave requests and attendance for local development.
+// Run from backend: npm run seed. Employees who already have leave requests are skipped, and
+// attendance only fills days that have no record yet, so it is safe to run again.
 require("dotenv").config({ quiet: true });
 
 const prisma = require("../src/utils/prisma");
+const companyTime = require("../src/utils/companyTime");
+const { SHIFT } = require("../src/utils/attendanceRules");
 
 const LEAVE_TYPES = ["Annual", "Sick", "Casual"];
 const REASONS = {
@@ -115,6 +117,67 @@ function sampleLeave(employee) {
   return rows;
 }
 
+// ---------- Attendance ----------
+
+// Six weeks, about 30 working days.
+const HISTORY_DAYS = 42;
+
+const toTime = (minutes) => `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+
+// One day's check-in, or null for an absence. About 8% of days are absences and 20% are late;
+// everyone else arrives up to 25 minutes early. Today only gets what has already happened.
+function sampleDay(employee, dateKey, today, nowMinutes) {
+  const roll = hash(`${employee.employeeId}|${dateKey}`) % 100;
+  if (roll < 8) return null;
+
+  const start = companyTime.toMinutes(SHIFT.start);
+  const checkIn = roll < 28 ? start + SHIFT.graceMinutes + 1 + (roll % 35) : start - 25 + (roll % 24);
+  const checkOut = companyTime.toMinutes(SHIFT.end) + (roll % 50);
+  const isToday = dateKey === today;
+
+  if (isToday && checkIn > nowMinutes) return null;
+
+  return {
+    employeeId: employee.id,
+    date: companyTime.asDbDate(dateKey),
+    checkIn: companyTime.fromCompanyTime(dateKey, toTime(checkIn)),
+    checkOut: isToday && checkOut > nowMinutes ? null : companyTime.fromCompanyTime(dateKey, toTime(checkOut)),
+  };
+}
+
+const seedAttendance = async () => {
+  const today = companyTime.todayKey();
+  const nowMinutes = companyTime.nowMinutes();
+  const days = Array.from({ length: HISTORY_DAYS }, (_, i) => companyTime.addDays(today, -i)).filter(
+    (day) => !companyTime.isWeekend(day)
+  );
+
+  const employees = await prisma.employee.findMany({
+    include: { leaveRequests: { where: { status: "APPROVED" } } },
+    orderBy: { id: "asc" },
+  });
+
+  let created = 0;
+  for (const employee of employees) {
+    const hired = companyTime.toDateKey(employee.hireDate);
+    const onLeave = (day) =>
+      employee.leaveRequests.some(
+        (r) => companyTime.toDateKey(r.startDate) <= day && day <= companyTime.toDateKey(r.endDate)
+      );
+
+    const data = days
+      .filter((day) => day >= hired && !onLeave(day))
+      .map((day) => sampleDay(employee, day, today, nowMinutes))
+      .filter(Boolean);
+
+    // skipDuplicates leaves days that already have a record (and HR corrections) alone.
+    const { count } = await prisma.attendance.createMany({ data, skipDuplicates: true });
+    created += count;
+  }
+
+  console.log(`Attendance: created ${created} record(s) for the last ${HISTORY_DAYS} days.`);
+};
+
 const main = async () => {
   const total = await prisma.employee.count();
   const employees = await prisma.employee.findMany({
@@ -132,6 +195,9 @@ const main = async () => {
     `Leave requests: created ${created} for ${employees.length} employee(s); ` +
       `skipped ${total - employees.length} who already had some.`
   );
+
+  // After leave, so days on approved leave get no check-in.
+  await seedAttendance();
 };
 
 main()
